@@ -110,23 +110,6 @@ Datasheets on the chip are available in [./hardware](./hardware/) directory.
 
 ~~~
 
-### 4、Examples
-
-~~~
- -✅ bq25896：bq25896 test
- -✅ bq27220：bq27220 test
- -✅ display_test：Ink screen display test.
- -✅ factory：Factory firmware program.
- -✅ GPS：The GPS test needs to be done outdoors.
- -✅ io_extend：IO expansion chip test.
- -✅ lora_recv：SX1262 LoRa send test.
- -✅ lora_send：SX1262 LoRa recv test.
- -✅ lvgl_test：Test using LVGL as image engine.
- -✅ rtc_pcf8563：Real-time clock chip test.
- -✅ sd_card：SD card read test.
- -✅ touch：GT911 test.
-~~~
-
 ## :four: Pins 🎁
 
 ~~~c
