@@ -7,3 +7,5 @@ script
 hardware/T-EPD47-S V1.0 24-04-20.pdf
 hardware/T-EPD47-S V1.0 24-05-21.pdf
 .vscode
+build/
+lib/epdiy/examples/
