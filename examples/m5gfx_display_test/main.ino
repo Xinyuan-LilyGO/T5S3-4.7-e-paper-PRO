@@ -365,9 +365,9 @@ void drawCornerLabels()
     display.setTextDatum(textdatum_t::top_right);
     display.drawString("TR", display.width() - 12, 10);
     display.setTextDatum(textdatum_t::bottom_left);
-    display.drawString("BL", 12, display.height() - 10);
+    display.drawString("BL", 12, display.height() - 13);
     display.setTextDatum(textdatum_t::bottom_right);
-    display.drawString("BR", display.width() - 12, display.height() - 10);
+    display.drawString("BR", display.width() - 12, display.height() - 13);
 }
 
 uint32_t grayColor(uint8_t gray)
@@ -496,7 +496,6 @@ void drawTestPattern()
     const int content_width = width - margin * 2;
 
     display.fillScreen(TFT_WHITE);
-    drawCornerLabels();
 
     display.setTextWrap(false);
     display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -531,10 +530,12 @@ void drawTestPattern()
     display.setFont(&fonts::Font2);
     display.setTextColor(TFT_BLACK, grayColor(246));
     display.setTextDatum(textdatum_t::top_left);
-    display.drawString(String("Panel: ") + width + "x" + height, margin + 16, y + 44);
-    display.drawString(String("I80 bus: ") + (kEpdBusSpeedHz / 1000000) + " MHz", margin + 16, y + 68);
-    display.drawString("Rotation: setRotation(0) + offset_rotation(3)", margin + 16, y + 92);
+    display.drawString(String("Panel: ") + width + "x" + height, margin + 16, y + 34);
+    display.drawString(String("I80 bus: ") + (kEpdBusSpeedHz / 1000000) + " MHz", margin + 16, y + 58);
+    display.drawString("Rotation: setRotation(0) + offset_rotation(3)", margin + 16, y + 80);
     display.drawString("If direction is still wrong, adjust kPanelOffsetRotation.", margin + 16, y + 116);
+
+    drawCornerLabels();
 }
 
 void renderTestPattern()
