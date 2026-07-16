@@ -3,6 +3,8 @@
 This example bypasses the normal full-frame EPD update path and drives the
 parallel panel with the ESP-IDF I80 peripheral and DMA. It is intended for
 refresh-rate and ghosting experiments, not normal application rendering.
+The default active area is the complete `960x540` panel, and every rendered
+frame submits all 540 rows for refresh.
 
 In `platformio.ini`, comment out the currently selected `src_dir` and enable
 `src_dir = examples/epd_60fps_probe/main`. Then build and upload with:

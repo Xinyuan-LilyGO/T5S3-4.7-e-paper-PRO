@@ -3,19 +3,19 @@
 #include <stdint.h>
 
 #ifndef EPD_ACTIVE_X
-#define EPD_ACTIVE_X 432
+#define EPD_ACTIVE_X 0
 #endif
 
 #ifndef EPD_ACTIVE_Y
-#define EPD_ACTIVE_Y 30
+#define EPD_ACTIVE_Y 0
 #endif
 
 #ifndef EPD_ACTIVE_WIDTH
-#define EPD_ACTIVE_WIDTH 432
+#define EPD_ACTIVE_WIDTH 960
 #endif
 
 #ifndef EPD_ACTIVE_HEIGHT
-#define EPD_ACTIVE_HEIGHT 480
+#define EPD_ACTIVE_HEIGHT 540
 #endif
 
 namespace t5s3_epd {
@@ -25,8 +25,8 @@ static constexpr const char *kBoardName = "LilyGO T5 E-Paper S3 Pro";
 static constexpr uint16_t kPanelWidth = 960;
 static constexpr uint16_t kPanelHeight = 540;
 
-// The raw scanner can target either the centered probe area or the complete
-// panel; the active geometry is selected by the EPD_ACTIVE_* macros above.
+// The raw scanner refreshes the complete panel by default. The active geometry
+// can still be overridden with the EPD_ACTIVE_* build flags for experiments.
 static constexpr uint16_t kActiveX = EPD_ACTIVE_X;
 static constexpr uint16_t kActiveY = EPD_ACTIVE_Y;
 static constexpr uint16_t kActiveWidth = EPD_ACTIVE_WIDTH;
@@ -55,11 +55,7 @@ static constexpr uint8_t kPcaMaskShutdownOutputs =
 }  // namespace t5s3_epd
 
 #ifndef TARGET_FPS
-#define TARGET_FPS 24
-#endif
-
-#ifndef EPD_DIRTY_PADDING
-#define EPD_DIRTY_PADDING 8
+#define TARGET_FPS 60
 #endif
 
 #ifndef EPD_BUS_HZ
@@ -67,11 +63,11 @@ static constexpr uint8_t kPcaMaskShutdownOutputs =
 #endif
 
 #ifndef EPD_VIDEO_TOP_DUMMY_LINES
-#define EPD_VIDEO_TOP_DUMMY_LINES 30
+#define EPD_VIDEO_TOP_DUMMY_LINES 0
 #endif
 
 #ifndef EPD_VIDEO_BOTTOM_DUMMY_LINES
-#define EPD_VIDEO_BOTTOM_DUMMY_LINES 30
+#define EPD_VIDEO_BOTTOM_DUMMY_LINES 0
 #endif
 
 #ifndef EPD_VCOM_MV

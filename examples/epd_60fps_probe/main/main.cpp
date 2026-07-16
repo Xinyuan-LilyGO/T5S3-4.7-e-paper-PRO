@@ -144,7 +144,6 @@ void render_task(void *unused)
     const TickType_t frame_ticks = pdMS_TO_TICKS(frame_period_ms);
     uint64_t log_window_start = esp_timer_get_time();
     uint32_t log_frames = 0;
-    int previous_y = 12;
 
     ESP_LOGI(kTag, "render task core=%d target=%d fps", xPortGetCoreID(),
              TARGET_FPS);
@@ -158,26 +157,7 @@ void render_task(void *unused)
         compute_probe_position(frame, x, y);
         draw_probe(backbuffer, x, y);
 
-        if (frame == 0) {
-            epd_video_flip(0, t5s3_epd::kActiveHeight);
-        } else {
-            int dirty_top = previous_y < y ? previous_y : y;
-            int dirty_bottom = previous_y + kProbeHeight - 1;
-            if (y + kProbeHeight - 1 > dirty_bottom) {
-                dirty_bottom = y + kProbeHeight - 1;
-            }
-            dirty_top -= EPD_DIRTY_PADDING;
-            dirty_bottom += EPD_DIRTY_PADDING;
-            if (dirty_top < 0) {
-                dirty_top = 0;
-            }
-            if (dirty_bottom >= t5s3_epd::kActiveHeight) {
-                dirty_bottom = t5s3_epd::kActiveHeight - 1;
-            }
-            epd_video_flip(static_cast<uint16_t>(dirty_top),
-                           static_cast<uint16_t>(dirty_bottom - dirty_top + 1));
-        }
-        previous_y = y;
+        epd_video_flip(0, t5s3_epd::kActiveHeight);
         ++log_frames;
 
         const uint64_t now = esp_timer_get_time();
