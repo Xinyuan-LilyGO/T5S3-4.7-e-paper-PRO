@@ -72,7 +72,7 @@ examples:
 | Firmware                        | Note                | Github                                                        |
 | ------------------------------- | ------------------- | ------------------------------------------------------------- |
 | T5_E_PAPER_S3_PRO_V1.0_20260506 | Factory program<br> | -                                                             |
-| corsspoint_lilygo_t5s3_e_paper  | Reader program      | [t5s3-reader](https://github.com/ShallowGreen123/t5s3-reader) |
+| corsspoint_lilygo_t5s3_e_paper  | Reader program      | [T5S3-Reader](https://github.com/ShallowGreen123/T5S3-Reader) |
 | T5S3-GameBoy              | Game console emulator     | [T5S3-GameBoy](https://github.com/ShallowGreen123/T5S3-GameBoy) |
 
 

@@ -72,7 +72,7 @@
 | 固件 | 说明 | Github |
 | --- | --- | --- |
 | T5_E_PAPER_S3_PRO_V1.0_20260506 | 出厂程序<br> | - |
-| corsspoint_lilygo_t5s3_e_paper | 阅读器程序 | [t5s3-reader](https://github.com/ShallowGreen123/t5s3-reader) |
+| corsspoint_lilygo_t5s3_e_paper | 阅读器程序 | [T5S3-Reader](https://github.com/ShallowGreen123/T5S3-Reader) |
 | T5S3-GameBoy              | 游戏机模拟器     | [T5S3-GameBoy](https://github.com/ShallowGreen123/T5S3-GameBoy) |
 
 ### 2.2. 使用 ESP 官方 `flash_download_tool` 下载程序
