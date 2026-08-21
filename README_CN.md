@@ -152,6 +152,8 @@
 | nvs_test | examples/nvs_test | NVS（非易失性存储）测试 |
 | sd_card | examples/sd_card | SD 卡读写测试 |
 | touch | examples/touch | GT911 电容触摸 IC 测试 |
+| touch_gt6972p | examples/touch_gt6972p | GT6972P 触摸及主动笔测试 |
+| touch_gt6972p_pen_display | examples/touch_gt6972p_pen_display | GT6972P 主动笔屏幕书写测试 |
 
 ## :four: 引脚 🎁
 

@@ -1,0 +1,8 @@
+{
+    "name": "GoodixGT6972P",
+    "version": "0.1.0",
+    "description": "Minimal Arduino I2C driver for GT6972P touch and active pen events",
+    "license": "GPL-2.0-only",
+    "frameworks": "arduino",
+    "platforms": "espressif32"
+}

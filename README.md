@@ -154,6 +154,8 @@ Reference [flash_download_tool](./docs/flash_download_tool/flash_download_tool.m
 | nvs_test | examples/nvs_test | NVS (non-volatile storage) test |
 | sd_card | examples/sd_card | SD card read/write test |
 | touch | examples/touch | GT911 capacitive touch IC test |
+| touch_gt6972p | examples/touch_gt6972p | GT6972P touch and active pen test |
+| touch_gt6972p_pen_display | examples/touch_gt6972p_pen_display | On-screen GT6972P active pen drawing test |
 
 ## :four: Pins 🎁
 
