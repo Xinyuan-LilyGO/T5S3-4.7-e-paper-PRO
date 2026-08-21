@@ -34,7 +34,12 @@ constexpr size_t kActiveRightPadBytes =
 constexpr size_t kDmaRowBytes = kPanelRowBytes;
 constexpr uint8_t kResetCounterMask[4] = {0xFC, 0xE0, 0x1C, 0x00};
 
-constexpr gpio_num_t kDummyDcGpio = GPIO_NUM_0;
+#ifndef EPD_VIDEO_DUMMY_DC_GPIO
+#define EPD_VIDEO_DUMMY_DC_GPIO 0
+#endif
+
+constexpr gpio_num_t kDummyDcGpio =
+    static_cast<gpio_num_t>(EPD_VIDEO_DUMMY_DC_GPIO);
 constexpr gpio_num_t kWrGpio = GPIO_NUM_4;
 constexpr gpio_num_t kCsGpio = GPIO_NUM_41;
 constexpr gpio_num_t kLeGpio = GPIO_NUM_42;

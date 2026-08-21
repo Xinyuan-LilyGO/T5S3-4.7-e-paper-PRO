@@ -14,8 +14,6 @@
 #include "GoodixGT6972P.h"
 #include "T5EpaperDisplay.h"
 
-using lgfx::epd_mode_t;
-
 namespace {
 
 constexpr int kTouchSda = 39;
@@ -39,7 +37,7 @@ constexpr int kMinBrushRadius = 1;
 constexpr int kMaxBrushRadius = 8;
 constexpr int kEraserRadius = 12;
 
-constexpr uint32_t kActiveRefreshIntervalMs = 20;
+constexpr uint32_t kActiveRefreshIntervalMs = 0;
 constexpr uint32_t kIdleRefreshIntervalMs = 140;
 constexpr uint32_t kStatusRenderIntervalMs = 300;
 constexpr uint32_t kIdleQualityDelayMs = 900;
@@ -52,6 +50,9 @@ constexpr uint16_t kTouchQueueLength = 256;
 constexpr uint32_t kTouchTaskStackSize = 4096;
 constexpr UBaseType_t kTouchTaskPriority = 4;
 constexpr BaseType_t kTouchTaskCore = 0;
+constexpr uint32_t kPenUiTaskStackSize = 8192;
+constexpr UBaseType_t kPenUiTaskPriority = 2;
+constexpr BaseType_t kPenUiTaskCore = 0;
 
 // Adjust these values only if the fitted sensor orientation differs.
 constexpr bool kSwapAxes = false;
@@ -170,7 +171,9 @@ uint32_t total_errors = 0;
 uint32_t consecutive_errors = 0;
 uint32_t rate_window_start_ms = 0;
 uint32_t rate_window_samples = 0;
+uint32_t rate_window_vsync = 0;
 uint16_t sample_rate_hz = 0;
+uint16_t display_rate_fps = 0;
 uint32_t last_contact_ms = 0;
 uint32_t last_display_ms = 0;
 uint32_t last_status_render_ms = 0;
@@ -181,9 +184,10 @@ const char *last_error = "none";
 QueueHandle_t touch_queue = nullptr;
 SemaphoreHandle_t touch_driver_mutex = nullptr;
 TaskHandle_t touch_task_handle = nullptr;
+TaskHandle_t pen_ui_task_handle = nullptr;
 volatile uint32_t dropped_touch_samples = 0;
 
-lgfx::LGFX_Device &screen()
+lgfx::LovyanGFX &screen()
 {
     return t5epd::display();
 }
@@ -207,35 +211,13 @@ void markDirty(const Rect &rect)
     dirty.include(clipToScreen(rect));
 }
 
-void present(const Rect &region, epd_mode_t mode)
+void present(const Rect &region)
 {
     const Rect clipped = clipToScreen(region);
     if (clipped.w <= 0 || clipped.h <= 0) {
         return;
     }
-
-    screen().waitDisplay();
-
-    // Panel_EPD tracks modified pixels after applying display rotation. Passing
-    // a logical rectangle to display(x, y, w, h) bypasses that transform and
-    // corrupts portrait partial updates. Rewriting the two corner pixels with
-    // their current values expands the panel's native dirty range safely.
-    const int right = clipped.x + clipped.w - 1;
-    const int bottom = clipped.y + clipped.h - 1;
-    const uint32_t top_left_color = screen().readPixel(clipped.x, clipped.y);
-    const uint32_t bottom_right_color = screen().readPixel(right, bottom);
-    screen().startWrite();
-    screen().drawPixel(clipped.x, clipped.y, top_left_color);
-    if (right != clipped.x || bottom != clipped.y) {
-        screen().drawPixel(right, bottom, bottom_right_color);
-    }
-    screen().endWrite();
-
-    screen().powerSaveOff();
-    screen().setEpdMode(mode);
-    screen().display();
-    screen().waitDisplay();
-    screen().powerSaveOn();
+    t5epd::present(clipped.x, clipped.y, clipped.w, clipped.h);
 }
 
 const char *penStateLabel()
@@ -366,7 +348,8 @@ void drawStatusBar()
         snprintf(text, sizeof(text), "%d%%", pen.battery);
         screen().drawString(text, 198, 94);
     }
-    snprintf(text, sizeof(text), "RATE %3u Hz", sample_rate_hz);
+    snprintf(text, sizeof(text), "PEN %3u EPD %2u", sample_rate_hz,
+             display_rate_fps);
     screen().drawString(text, 240, 94);
     snprintf(text, sizeof(text), "SAMPLES %lu",
              static_cast<unsigned long>(total_samples));
@@ -454,6 +437,25 @@ int pressureRadius(uint16_t pressure)
            limited * (kMaxBrushRadius - kMinBrushRadius) / kPenMaxPressure;
 }
 
+void drawBrushSegment(int x0, int y0, int radius0, int x1, int y1,
+                      int radius1, uint32_t color)
+{
+    const int dx = x1 - x0;
+    const int dy = y1 - y0;
+    const int steps = std::max(abs(dx), abs(dy));
+    if (steps == 0) {
+        screen().fillCircle(x1, y1, radius1, color);
+        return;
+    }
+
+    for (int step = 0; step <= steps; ++step) {
+        const int x = x0 + dx * step / steps;
+        const int y = y0 + dy * step / steps;
+        const int radius = radius0 + (radius1 - radius0) * step / steps;
+        screen().fillCircle(x, y, radius, color);
+    }
+}
+
 void drawPenStroke(int x, int y, uint16_t pressure, bool eraser,
                    uint32_t now)
 {
@@ -467,8 +469,8 @@ void drawPenStroke(int x, int y, uint16_t pressure, bool eraser,
     screen().setClipRect(canvas.x + 1, canvas.y + 1,
                          canvas.w - 2, canvas.h - 2);
     if (can_join) {
-        screen().drawWedgeLine(previous_stroke_x, previous_stroke_y, x, y,
-                               previous_stroke_radius, radius, color);
+        drawBrushSegment(previous_stroke_x, previous_stroke_y,
+                         previous_stroke_radius, x, y, radius, color);
     } else {
         screen().fillCircle(x, y, radius, color);
     }
@@ -826,6 +828,7 @@ void updateSampleRate()
     const uint32_t now = millis();
     if (rate_window_start_ms == 0) {
         rate_window_start_ms = now;
+        rate_window_vsync = t5epd::vsyncCount();
         return;
     }
     const uint32_t elapsed = now - rate_window_start_ms;
@@ -834,7 +837,11 @@ void updateSampleRate()
     }
 
     sample_rate_hz = static_cast<uint16_t>(rate_window_samples * 1000 / elapsed);
+    const uint32_t vsync = t5epd::vsyncCount();
+    display_rate_fps = static_cast<uint16_t>(
+        (vsync - rate_window_vsync) * 1000 / elapsed);
     rate_window_samples = 0;
+    rate_window_vsync = vsync;
     rate_window_start_ms = now;
     status_dirty = true;
 }
@@ -874,8 +881,7 @@ void serviceDisplay()
             status_dirty = false;
             last_status_render_ms = now;
         }
-        present({0, 0, screen().width(), screen().height()},
-                epd_mode_t::epd_quality);
+        present({0, 0, screen().width(), screen().height()});
         dirty.clear();
         force_quality_refresh = false;
         force_text_refresh = false;
@@ -886,7 +892,7 @@ void serviceDisplay()
 
     if (cleanup_pending && (!pen.present || pen.hover) &&
         now - last_contact_ms >= kIdleQualityDelayMs) {
-        present(canvas, epd_mode_t::epd_quality);
+        present(canvas);
         dirty.clear();
         cleanup_pending = false;
         force_text_refresh = false;
@@ -902,12 +908,7 @@ void serviceDisplay()
         }
 
         const Rect update_region = dirty.rectangle();
-        const epd_mode_t mode = force_text_refresh
-                                    ? epd_mode_t::epd_text
-                                    : (pen.present
-                                           ? epd_mode_t::epd_fastest
-                                           : epd_mode_t::epd_fast);
-        present(update_region, mode);
+        present(update_region);
         dirty.clear();
         force_text_refresh = false;
         last_display_ms = millis();
@@ -921,10 +922,33 @@ void serviceDisplay()
         screen().startWrite();
         drawStatusBar();
         screen().endWrite();
-        present({0, 0, screen().width(), kHeaderHeight},
-                epd_mode_t::epd_fast);
+        present({0, 0, screen().width(), kHeaderHeight});
         status_dirty = false;
         last_status_render_ms = millis();
+    }
+}
+
+void servicePenUiOnce()
+{
+    pollBootButton();
+    if (touch_ready) {
+        pollTouch();
+    } else {
+        retryTouchIfNeeded();
+    }
+    updateSampleRate();
+    serviceDisplay();
+}
+
+void penUiTask(void *unused)
+{
+    (void)unused;
+    Serial.printf("[GT6972P_PEN] UI task started: core=%d priority=%u\n",
+                  xPortGetCoreID(),
+                  static_cast<unsigned>(kPenUiTaskPriority));
+    for (;;) {
+        servicePenUiOnce();
+        vTaskDelay(1);
     }
 }
 
@@ -946,9 +970,6 @@ void setup()
     }
     display_ready = true;
 
-    screen().setAutoDisplay(false);
-    screen().setColorDepth(4);
-    screen().setRotation(0);
     screen().setTextWrap(false);
     canvas = {kCanvasMargin, kHeaderHeight + kCanvasGap,
               screen().width() - kCanvasMargin * 2,
@@ -964,24 +985,29 @@ void setup()
     drawStatusBar();
     drawCanvasBase();
     screen().endWrite();
-    present({0, 0, screen().width(), screen().height()},
-            epd_mode_t::epd_quality);
+    present({0, 0, screen().width(), screen().height()});
     dirty.clear();
     status_dirty = false;
     last_display_ms = millis();
     last_status_render_ms = millis();
     last_touch_retry_ms = millis();
+
+    const BaseType_t ui_created = xTaskCreatePinnedToCore(
+        penUiTask, "pen_ui", kPenUiTaskStackSize, nullptr,
+        kPenUiTaskPriority, &pen_ui_task_handle, kPenUiTaskCore);
+    if (ui_created != pdPASS) {
+        pen_ui_task_handle = nullptr;
+        Serial.println("[GT6972P_PEN] UI task creation failed; "
+                       "using Arduino loop");
+    }
 }
 
 void loop()
 {
-    pollBootButton();
-    if (touch_ready) {
-        pollTouch();
-    } else {
-        retryTouchIfNeeded();
+    if (pen_ui_task_handle == nullptr) {
+        servicePenUiOnce();
+        delay(1);
+        return;
     }
-    updateSampleRate();
-    serviceDisplay();
-    delay(1);
+    delay(1000);
 }

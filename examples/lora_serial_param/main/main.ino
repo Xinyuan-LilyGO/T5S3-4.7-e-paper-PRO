@@ -23,6 +23,7 @@
 
   Notes:
     - Parameter changes are applied immediately.
+    - The radio starts automatic transmission after initialization.
     - TX:1 sends payload[] = {1, 2, 3, 4, 5} every 500 ms.
     - TX and RX cannot both be enabled at the same time.
     - cw:1 starts continuous wave output, cw:0 returns to standby.
@@ -54,12 +55,12 @@ ExtensionIOXL9555 io;
 SX1262 radio = new Module(LORA_CS, LORA_IRQ, LORA_RST, LORA_BUSY);
 
 struct LoRaSettings {
-    float freq = 868.0f;
-    float bw = 125.0f;
-    uint8_t sf = 10;
+    float freq = 915.0f;
+    float bw = 500.0f;
+    uint8_t sf = 11;
     uint8_t cr = 6;
     uint8_t sw = 0x12;
-    int8_t tx_power = 22;
+    int8_t tx_power = 7;
     uint16_t preamble_length = 15;
     bool crc = false;
     bool iq_inverted = false;
@@ -953,7 +954,7 @@ void setup()
 
     SPI.begin(BOARD_SPI_SCLK, BOARD_SPI_MISO, BOARD_SPI_MOSI);
 
-    if (!configureRadio(RadioMode::Standby)) {
+    if (!configureRadio(RadioMode::TxAuto)) {
         Serial.println(F("[LORA] radio init failed"));
         while (true) {
             delay(1000);

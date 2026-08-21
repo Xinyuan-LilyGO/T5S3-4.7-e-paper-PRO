@@ -6,6 +6,8 @@
 namespace t5epd {
 
 bool begin();
-lgfx::LGFX_Device &display();
+lgfx::LovyanGFX &display();
+bool present(int x, int y, int width, int height);
+uint32_t vsyncCount();
 
 } // namespace t5epd
