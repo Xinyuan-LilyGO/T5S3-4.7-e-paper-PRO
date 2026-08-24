@@ -34,6 +34,13 @@ constexpr size_t kActiveRightPadBytes =
 constexpr size_t kDmaRowBytes = kPanelRowBytes;
 constexpr uint8_t kResetCounterMask[4] = {0xFC, 0xE0, 0x1C, 0x00};
 
+#ifndef EPD_VIDEO_PULSE_REPEAT
+#define EPD_VIDEO_PULSE_REPEAT 1
+#endif
+
+static_assert(EPD_VIDEO_PULSE_REPEAT >= 1,
+              "pulse repeat count must be at least one");
+
 #ifndef EPD_VIDEO_DUMMY_DC_GPIO
 #define EPD_VIDEO_DUMMY_DC_GPIO 0
 #endif
@@ -82,7 +89,7 @@ uint8_t *g_buffers[2] = {nullptr, nullptr};
 uint8_t *g_state_buffer = nullptr;
 uint8_t *g_dma_buf[2] = {nullptr, nullptr};
 uint8_t *g_blank_row = nullptr;
-uint8_t g_row_active[t5s3_epd::kActiveHeight] = {0};
+volatile uint8_t g_row_active[t5s3_epd::kActiveHeight] = {0};
 
 volatile bool g_running = false;
 volatile bool g_dma_done = true;
@@ -403,7 +410,8 @@ bool send_row(uint8_t *data, bool first_row)
 
 // Each state byte describes two source pixels. The low bits hold the desired
 // direction and the upper bits are short per-pixel pulse counters.
-bool build_active_row(const uint8_t *frame, uint16_t row, uint8_t *dst)
+bool build_active_row(const uint8_t *frame, uint16_t row, uint8_t *dst,
+                      bool advance_counters)
 {
     memset(dst, 0x00, kDmaRowBytes);
     uint8_t *write_ptr = dst + kActiveLeftPadBytes;
@@ -433,9 +441,11 @@ bool build_active_row(const uint8_t *frame, uint16_t row, uint8_t *dst)
                     (state & 0x10U) ? 0x00U
                                     : ((driving_dir & 0x01U) ? 0x01U : 0x02U));
 
-                const uint8_t counter_increment = static_cast<uint8_t>(
-                    ((~state) >> 2) & 0x24U);
-                state = static_cast<uint8_t>(state + counter_increment);
+                if (advance_counters) {
+                    const uint8_t counter_increment = static_cast<uint8_t>(
+                        ((~state) >> 2) & 0x24U);
+                    state = static_cast<uint8_t>(state + counter_increment);
+                }
                 needs_more_drive = needs_more_drive ||
                                     ((state & 0x90U) != 0x90U);
                 *state_ptr++ = state;
@@ -451,7 +461,7 @@ bool build_active_row(const uint8_t *frame, uint16_t row, uint8_t *dst)
 
 uint8_t *prepare_scan_row(const uint8_t *frame, uint16_t scan_row,
                           uint8_t dma_index, uint32_t &processed_rows,
-                          uint32_t &continuing_rows)
+                          uint32_t &continuing_rows, bool advance_counters)
 {
     if (scan_row < EPD_VIDEO_TOP_DUMMY_LINES) {
         return g_blank_row;
@@ -464,7 +474,8 @@ uint8_t *prepare_scan_row(const uint8_t *frame, uint16_t scan_row,
     }
 
     ++processed_rows;
-    if (build_active_row(frame, active_row, g_dma_buf[dma_index])) {
+    if (build_active_row(frame, active_row, g_dma_buf[dma_index],
+                         advance_counters)) {
         ++continuing_rows;
     }
     return g_dma_buf[dma_index];
@@ -534,13 +545,16 @@ void scan_task(void *unused)
         }
 
         const uint8_t *frame = g_buffers[front_index];
+        const bool advance_counters =
+            (g_vsync_count % EPD_VIDEO_PULSE_REPEAT) == 0;
         uint32_t processed_rows = 0;
         uint32_t continuing_rows = 0;
         row_control_start();
 
         uint8_t dma_index = 0;
         uint8_t *row_ptr = prepare_scan_row(frame, 0, dma_index,
-                                            processed_rows, continuing_rows);
+                                            processed_rows, continuing_rows,
+                                            advance_counters);
         bool row_uses_dma = row_ptr != g_blank_row;
         if (!send_row(row_ptr, true)) {
             g_running = false;
@@ -552,7 +566,8 @@ void scan_task(void *unused)
                                                 ? static_cast<uint8_t>(dma_index ^ 1U)
                                                 : dma_index;
             uint8_t *next_row = prepare_scan_row(
-                frame, scan_row, next_dma_index, processed_rows, continuing_rows);
+                frame, scan_row, next_dma_index, processed_rows,
+                continuing_rows, advance_counters);
             const bool next_uses_dma = next_row != g_blank_row;
             if (!send_row(next_row, false)) {
                 g_running = false;
@@ -631,7 +646,9 @@ bool epd_video_power_on()
     memset(g_dma_buf[0], 0x00, kDmaRowBytes);
     memset(g_dma_buf[1], 0x00, kDmaRowBytes);
     memset(g_blank_row, 0x00, kDmaRowBytes);
-    memset(g_row_active, 0x00, sizeof(g_row_active));
+    for (uint16_t row = 0; row < t5s3_epd::kActiveHeight; ++row) {
+        g_row_active[row] = 0U;
+    }
     configure_idle_levels();
     ESP_LOGI(kTag, "panel power on, VCOM=%d mV", EPD_VCOM_MV);
     return true;
@@ -695,6 +712,28 @@ void epd_video_flip(uint16_t dirty_y, uint16_t dirty_height)
     g_flip_req = true;
     portEXIT_CRITICAL(&g_buffer_lock);
     (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+}
+
+bool epd_video_wait_idle(uint32_t timeout_ms)
+{
+    const uint32_t start_ms = millis();
+    while (g_running) {
+        bool active = false;
+        for (uint16_t row = 0; row < t5s3_epd::kActiveHeight; ++row) {
+            if (g_row_active[row] != 0U) {
+                active = true;
+                break;
+            }
+        }
+        if (!active) {
+            return true;
+        }
+        if (millis() - start_ms >= timeout_ms) {
+            return false;
+        }
+        vTaskDelay(1);
+    }
+    return false;
 }
 
 uint32_t epd_video_get_vsync_count()

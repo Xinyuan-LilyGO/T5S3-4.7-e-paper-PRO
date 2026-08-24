@@ -30,8 +30,6 @@ constexpr uint16_t kTouchHeight = 1216;
 constexpr int kHeaderHeight = 156;
 constexpr int kCanvasMargin = 8;
 constexpr int kCanvasGap = 8;
-constexpr int kCursorRadius = 14;
-constexpr int kCursorPatchSize = kCursorRadius * 2 + 5;
 constexpr uint16_t kPenMaxPressure = 4096;
 constexpr int kMinBrushRadius = 1;
 constexpr int kMaxBrushRadius = 8;
@@ -39,7 +37,8 @@ constexpr int kEraserRadius = 12;
 
 constexpr uint32_t kActiveRefreshIntervalMs = 0;
 constexpr uint32_t kIdleRefreshIntervalMs = 140;
-constexpr uint32_t kStatusRenderIntervalMs = 300;
+constexpr uint32_t kActiveStatusRenderIntervalMs = 150;
+constexpr uint32_t kIdleStatusRenderIntervalMs = 300;
 constexpr uint32_t kIdleQualityDelayMs = 900;
 constexpr uint32_t kFallbackPollIntervalMs = 10;
 constexpr uint32_t kTouchRetryIntervalMs = 5000;
@@ -134,17 +133,10 @@ struct QueuedTouchSample {
     GoodixGT6972P::PenPoint pen = {};
 };
 
-struct CursorOverlay {
-    bool valid = false;
-    Rect rect = {};
-    uint16_t background[kCursorPatchSize * kCursorPatchSize] = {};
-};
-
 GoodixGT6972P touch;
 Rect canvas;
 DirtyRect dirty;
 PenTelemetry pen;
-CursorOverlay cursor;
 
 bool display_ready = false;
 volatile bool touch_ready = false;
@@ -395,41 +387,6 @@ void drawCanvasBase()
     markDirty(canvas);
 }
 
-void restoreCursor()
-{
-    if (!cursor.valid) {
-        return;
-    }
-    screen().pushImage(cursor.rect.x, cursor.rect.y, cursor.rect.w,
-                       cursor.rect.h, cursor.background);
-    markDirty(cursor.rect);
-    cursor.valid = false;
-}
-
-void showHoverCursor(int x, int y)
-{
-    screen().startWrite();
-    restoreCursor();
-
-    const Rect requested = {x - kCursorRadius - 2, y - kCursorRadius - 2,
-                            kCursorPatchSize, kCursorPatchSize};
-    cursor.rect = clipToScreen(requested);
-    screen().readRect(cursor.rect.x, cursor.rect.y, cursor.rect.w,
-                      cursor.rect.h, cursor.background);
-    cursor.valid = true;
-
-    screen().setClipRect(canvas.x + 1, canvas.y + 1,
-                         canvas.w - 2, canvas.h - 2);
-    screen().drawCircle(x, y, kCursorRadius, TFT_BLACK);
-    screen().drawFastHLine(x - kCursorRadius - 4, y,
-                           kCursorRadius * 2 + 9, TFT_BLACK);
-    screen().drawFastVLine(x, y - kCursorRadius - 4,
-                           kCursorRadius * 2 + 9, TFT_BLACK);
-    screen().clearClipRect();
-    screen().endWrite();
-    markDirty(cursor.rect);
-}
-
 int pressureRadius(uint16_t pressure)
 {
     const uint32_t limited = std::min<uint32_t>(pressure, kPenMaxPressure);
@@ -465,7 +422,6 @@ void drawPenStroke(int x, int y, uint16_t pressure, bool eraser,
                           now - previous_stroke_ms <= kStrokeGapTimeoutMs;
 
     screen().startWrite();
-    restoreCursor();
     screen().setClipRect(canvas.x + 1, canvas.y + 1,
                          canvas.w - 2, canvas.h - 2);
     if (can_join) {
@@ -524,11 +480,6 @@ void mapPenCoordinates(uint16_t raw_x, uint16_t raw_y, int &pixel_x,
 void releasePen(uint32_t now)
 {
     const bool was_contact = pen.present && !pen.hover;
-    if (cursor.valid) {
-        screen().startWrite();
-        restoreCursor();
-        screen().endWrite();
-    }
     if (was_contact) {
         cleanup_pending = true;
         last_contact_ms = now;
@@ -584,7 +535,6 @@ void handleTouchSample(const QueuedTouchSample &sample)
             last_contact_ms = now;
         }
         stroke_valid = false;
-        showHoverCursor(pixel_x, pixel_y);
     } else {
         cleanup_pending = false;
         last_contact_ms = now;
@@ -786,12 +736,12 @@ void pollTouch()
 void clearCanvas()
 {
     screen().startWrite();
-    restoreCursor();
     drawCanvasBase();
     screen().endWrite();
     stroke_valid = false;
     cleanup_pending = false;
     force_text_refresh = true;
+    force_quality_refresh = true;
 }
 
 void pollBootButton()
@@ -818,7 +768,7 @@ void pollBootButton()
     if (boot_stable_pressed && !boot_long_handled &&
         now - boot_press_ms >= kBootLongPressMs) {
         boot_long_handled = true;
-        force_quality_refresh = true;
+        clearCanvas();
         status_dirty = true;
     }
 }
@@ -881,7 +831,9 @@ void serviceDisplay()
             status_dirty = false;
             last_status_render_ms = now;
         }
-        present({0, 0, screen().width(), screen().height()});
+        if (!t5epd::clean()) {
+            Serial.println("[GT6972P_PEN] physical clean failed");
+        }
         dirty.clear();
         force_quality_refresh = false;
         force_text_refresh = false;
@@ -900,6 +852,18 @@ void serviceDisplay()
         return;
     }
 
+    const uint32_t status_interval =
+        pen.present ? kActiveStatusRenderIntervalMs
+                    : kIdleStatusRenderIntervalMs;
+    if (status_dirty && now - last_status_render_ms >= status_interval) {
+        screen().startWrite();
+        drawStatusBar();
+        screen().endWrite();
+        markDirty({0, 0, screen().width(), kHeaderHeight});
+        status_dirty = false;
+        last_status_render_ms = now;
+    }
+
     if (dirty.valid) {
         const uint32_t refresh_interval =
             pen.present ? kActiveRefreshIntervalMs : kIdleRefreshIntervalMs;
@@ -915,17 +879,6 @@ void serviceDisplay()
         return;
     }
 
-    // Pen drawing takes priority. Refresh telemetry only between strokes so a
-    // small pen dirty rectangle is never expanded to include the header.
-    if (status_dirty && !pen.present &&
-        now - last_status_render_ms >= kStatusRenderIntervalMs) {
-        screen().startWrite();
-        drawStatusBar();
-        screen().endWrite();
-        present({0, 0, screen().width(), kHeaderHeight});
-        status_dirty = false;
-        last_status_render_ms = millis();
-    }
 }
 
 void servicePenUiOnce()
@@ -985,7 +938,9 @@ void setup()
     drawStatusBar();
     drawCanvasBase();
     screen().endWrite();
-    present({0, 0, screen().width(), screen().height()});
+    if (!t5epd::clean()) {
+        Serial.println("[GT6972P_PEN] startup clean failed");
+    }
     dirty.clear();
     status_dirty = false;
     last_display_ms = millis();

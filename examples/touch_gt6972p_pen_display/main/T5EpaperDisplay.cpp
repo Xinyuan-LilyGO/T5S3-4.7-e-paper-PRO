@@ -17,10 +17,41 @@ namespace {
 constexpr int kBacklightPin = 11;
 constexpr uint8_t kSurfaceRotation = 3;
 constexpr uint8_t kExpanderInitAttempts = 3;
+constexpr uint8_t kCleanCycles = 2;
+constexpr uint32_t kDriveSettleTimeoutMs = 1000;
 
 Pca9535Min expander;
 lgfx::LGFX_Sprite surface;
 bool video_ready = false;
+
+bool submitAndWait(uint8_t *backbuffer)
+{
+    if (backbuffer == nullptr) {
+        return false;
+    }
+    epd_video_flip(0, t5s3_epd::kActiveHeight);
+    return epd_video_wait_idle(kDriveSettleTimeoutMs);
+}
+
+bool submitUniformFrame(uint8_t value)
+{
+    uint8_t *backbuffer = epd_video_get_backbuffer();
+    if (backbuffer == nullptr) {
+        return false;
+    }
+    memset(backbuffer, value, epd_video_get_backbuffer_size());
+    return submitAndWait(backbuffer);
+}
+
+void copySurfaceToBackbuffer(uint8_t *backbuffer)
+{
+    const uint8_t *source =
+        static_cast<const uint8_t *>(surface.getBuffer());
+    const size_t length = epd_video_get_backbuffer_size();
+    for (size_t i = 0; i < length; ++i) {
+        backbuffer[i] = static_cast<uint8_t>(~source[i]);
+    }
+}
 
 } // namespace
 
@@ -111,7 +142,9 @@ bool present(int x, int y, int width, int height)
     if (backbuffer == nullptr) {
         return false;
     }
-    memcpy(backbuffer, surface.getBuffer(), epd_video_get_backbuffer_size());
+    // This panel's source-driver polarity is opposite to the Sprite palette:
+    // native 0 is white and native 1 is black.
+    copySurfaceToBackbuffer(backbuffer);
 
     // Rotation 3 maps logical X to the native panel's reversed Y axis.
     const uint16_t dirty_y = static_cast<uint16_t>(
@@ -119,6 +152,29 @@ bool present(int x, int y, int width, int height)
     const uint16_t dirty_height = static_cast<uint16_t>(right - left);
     epd_video_flip(dirty_y, dirty_height);
     return true;
+}
+
+bool clean()
+{
+    if (!video_ready) {
+        return false;
+    }
+
+    bool settled = true;
+    for (uint8_t cycle = 0; cycle < kCleanCycles; ++cycle) {
+        settled = submitUniformFrame(0xFF) && settled;
+        settled = submitUniformFrame(0x00) && settled;
+    }
+
+    uint8_t *backbuffer = epd_video_get_backbuffer();
+    if (backbuffer == nullptr) {
+        return false;
+    }
+    copySurfaceToBackbuffer(backbuffer);
+    settled = submitAndWait(backbuffer) && settled;
+    Serial.printf("[GT6972P_PEN] physical clean %s\n",
+                  settled ? "complete" : "timed out");
+    return settled;
 }
 
 uint32_t vsyncCount()
