@@ -42,7 +42,7 @@ Note: The `Lite` version and the `Pro` version share the same schematic diagram,
 |  Battery Capacity   |                           3.7V-1500mAh                            |
 |    Battery Chip     |                  BQ25896 (0x6B), BQ27220 (0x55)                   |
 |        Touch        |                           GT911 (0x5D)                            |
-|         RTC         |                          PCF85063 (0x51)                          |
+|         RTC         |                          PCF8563 (0x51)                           |
 | E-link Power Driver |                          TPS65185 (0x68)                          |
 |      IO Extend      |                         PCA9535PW (0x20)                          |
 
