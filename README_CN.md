@@ -45,6 +45,8 @@
 | E-link 电源驱动 | TPS65185 (0x68) |
 | IO 扩展 | PCA9535PW (0x20) |
 
+说明：`GPS` 会装 `MIA-M10Q` 或者 `L76K` 两种模块之一。光看板子分辨不出来，两者默认波特率也不一样（L76K 9600，MIA-M10Q 38400），需要在软件里探测。见 [pinmap_cn.md](./docs/pinmap_cn.md) 第 4 节。
+
 ➡ **T5_E_Paper_S3_Pro 相关项目**：
 
 - [ [FastEPD](https://github.com/Xinyuan-LilyGO/FastEPD) ]：针对 ESP32 并口墨水屏优化的驱动库
