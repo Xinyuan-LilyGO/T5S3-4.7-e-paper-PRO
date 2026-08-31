@@ -161,6 +161,6 @@ Two GNSS modules ship on this board, the `MIA-M10Q` and the `L76K`. They use the
 ## 7. Code Notes
 
 - The `Pins` section in `README.md`, plus the macros in `examples/factory/main/utilities.h` and `examples/FastEPD_factory/main/utilities.h`, mostly match this schematic.
-- The product table in `README.md` lists the RTC as `PCF85063 (0x51)`, but schematic Page 3 / U3 shows `PCF8563TS`. If the drivers differ, prefer the schematic and the actual mounted component.
+- The RTC is a `PCF8563TS`, per schematic Page 3 / U3. The product table in `README.md` used to list it as `PCF85063 (0x51)` and was corrected on 2026-08-26.
 - GPS is shown in the schematic as `U0TXD/U0RXD -> GPS_RX/GPS_TX`. The repository maps this as `BOARD_GPS_TXD = 43` and `BOARD_GPS_RXD = 44`, which is consistent with ESP32-S3 pin naming.
 - The shared LoRa / GPS 3.3V rail is not always enabled. Before using either module, raise `PCA9535 IO0_0 / LORA_EN`.

@@ -162,6 +162,6 @@ I2C 地址：`0x20`，中断输出 `PCA_INT -> GPIO38`。
 ## 7. 代码现状提示
 
 - `README.md` 的 `Pins` 段落，以及 `examples/factory/main/utilities.h`、`examples/FastEPD_factory/main/utilities.h` 里的宏，和这份原理图基本一致。
-- `README.md` 产品表把 RTC 写成了 `PCF85063 (0x51)`，但原理图 Page 3 / U3 是 `PCF8563TS`；如果驱动初始化有差异，应该以原理图和实际器件为准。
+- RTC 是 `PCF8563TS`，见原理图 Page 3 / U3。`README.md` 产品表以前写成 `PCF85063 (0x51)`，已在 2026-08-26 更正。
 - `GPS` 在原理图里是 `U0TXD/U0RXD -> GPS_RX/GPS_TX`，仓库代码把它写成 `BOARD_GPS_TXD = 43`、`BOARD_GPS_RXD = 44`；这和 ESP32-S3 的引脚命名是一致的。
 - LoRa 与 GPS 的 3.3V 支路不是一直上电，使用前需要先拉起 `PCA9535 IO0_0 / LORA_EN`。
