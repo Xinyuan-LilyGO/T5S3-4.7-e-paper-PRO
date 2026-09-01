@@ -43,6 +43,8 @@
 
 > 说明：EPD 的 `EP_OE`、`EP_MODE`、`EP_VCOM` 不直连主控，分别经过 `PCA9535` 和 `TPS651851` 控制。
 
+> 说明：`PIN_BL_EN` 接的是 `PT4103B23F` 这颗 LED 升压驱动的 `EN` 脚，亮度用 PWM 调。PWM 频率不要超过约 1 kHz。0% 占空比是关，100% 占空比是满电流。
+
 ## 3. PCA9535 扩展 IO
 
 I2C 地址：`0x20`，中断输出 `PCA_INT -> GPIO38`。
@@ -93,6 +95,15 @@ I2C 地址：`0x20`，中断输出 `PCA_INT -> GPIO38`。
 | ESP32 `TX -> GPS_RX` | `PIN_GPS_TX` | 43 (`U0TXD`) | 原理图 Page 2 | 通过 `R11` 到 `GPS_RX` |
 | ESP32 `RX <- GPS_TX` | `PIN_GPS_RX` | 44 (`U0RXD`) | 原理图 Page 2 | 通过 `R12` 到 `GPS_TX` |
 | GPS 电源使能 | `PIN_GPS_EN` | `PCA9535 IO0_0` | 原理图 Page 1/3 | 与 LoRa 共用 `LORA_EN` |
+
+这块板子上会装两种 GNSS 模块，`MIA-M10Q` 和 `L76K`。两者封装位置相同，光看板子分辨不出装的是哪一颗，只能在软件里探测。两者默认波特率不一样：
+
+| 模块 | 默认波特率 |
+| --- | --- |
+| L76K | 9600 |
+| MIA-M10Q | 38400 |
+
+`examples/GPS/main/main.ino` 里已经做了这个探测：先用 9600 打开串口，如果 L76K 初始化没有响应，再用 38400 打开并走 u-blox 恢复流程。用户代码里写死一个波特率，只能在其中一种模块上工作，另一种上会完全收不到数据。
 
 ### SD 卡
 
@@ -151,6 +162,6 @@ I2C 地址：`0x20`，中断输出 `PCA_INT -> GPIO38`。
 ## 7. 代码现状提示
 
 - `README.md` 的 `Pins` 段落，以及 `examples/factory/main/utilities.h`、`examples/FastEPD_factory/main/utilities.h` 里的宏，和这份原理图基本一致。
-- `README.md` 产品表把 RTC 写成了 `PCF85063 (0x51)`，但原理图 Page 3 / U3 是 `PCF8563TS`；如果驱动初始化有差异，应该以原理图和实际器件为准。
+- RTC 是 `PCF8563TS`，见原理图 Page 3 / U3。`README.md` 产品表以前写成 `PCF85063 (0x51)`，已在 2026-08-26 更正。
 - `GPS` 在原理图里是 `U0TXD/U0RXD -> GPS_RX/GPS_TX`，仓库代码把它写成 `BOARD_GPS_TXD = 43`、`BOARD_GPS_RXD = 44`；这和 ESP32-S3 的引脚命名是一致的。
 - LoRa 与 GPS 的 3.3V 支路不是一直上电，使用前需要先拉起 `PCA9535 IO0_0 / LORA_EN`。

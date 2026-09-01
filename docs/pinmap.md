@@ -42,6 +42,8 @@
 
 > Note: EPD `EP_OE`, `EP_MODE`, and `EP_VCOM` are not directly connected to the MCU. They are controlled through `PCA9535` and `TPS651851`.
 
+> Note: `PIN_BL_EN` drives the `EN` pin of the `PT4103B23F` LED boost driver, and PWM is the way to set brightness. Keep the PWM frequency at or below about 1 kHz. 0% duty is off and 100% duty is full LED current.
+
 ## 3. PCA9535 GPIO Expander
 
 I2C address: `0x20`. Interrupt output: `PCA_INT -> GPIO38`.
@@ -92,6 +94,15 @@ I2C address: `0x20`. Interrupt output: `PCA_INT -> GPIO38`.
 | ESP32 `TX -> GPS_RX` | `PIN_GPS_TX` | 43 (`U0TXD`) | Schematic Page 2 | Routed through `R11` to `GPS_RX` |
 | ESP32 `RX <- GPS_TX` | `PIN_GPS_RX` | 44 (`U0RXD`) | Schematic Page 2 | Routed through `R12` to `GPS_TX` |
 | GPS power enable | `PIN_GPS_EN` | `PCA9535 IO0_0` | Schematic Page 1/3 | Shared with LoRa as `LORA_EN` |
+
+Two GNSS modules ship on this board, the `MIA-M10Q` and the `L76K`. They use the same footprint, a board carrying one cannot be told from a board carrying the other by looking at it, and the only way to know which one is fitted is to probe it in software. The default baud rates differ:
+
+| Module | Default baud |
+| --- | --- |
+| L76K | 9600 |
+| MIA-M10Q | 38400 |
+
+`examples/GPS/main/main.ino` already does that probe: it opens the UART at 9600, and if the L76K setup gets no answer it reopens at 38400 and runs the u-blox recovery. A fixed baud rate in user code works on one module and stays silent on the other.
 
 ### SD Card
 
@@ -150,6 +161,6 @@ I2C address: `0x20`. Interrupt output: `PCA_INT -> GPIO38`.
 ## 7. Code Notes
 
 - The `Pins` section in `README.md`, plus the macros in `examples/factory/main/utilities.h` and `examples/FastEPD_factory/main/utilities.h`, mostly match this schematic.
-- The product table in `README.md` lists the RTC as `PCF85063 (0x51)`, but schematic Page 3 / U3 shows `PCF8563TS`. If the drivers differ, prefer the schematic and the actual mounted component.
+- The RTC is a `PCF8563TS`, per schematic Page 3 / U3. The product table in `README.md` used to list it as `PCF85063 (0x51)` and was corrected on 2026-08-26.
 - GPS is shown in the schematic as `U0TXD/U0RXD -> GPS_RX/GPS_TX`. The repository maps this as `BOARD_GPS_TXD = 43` and `BOARD_GPS_RXD = 44`, which is consistent with ESP32-S3 pin naming.
 - The shared LoRa / GPS 3.3V rail is not always enabled. Before using either module, raise `PCA9535 IO0_0 / LORA_EN`.

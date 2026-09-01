@@ -46,6 +46,8 @@ Note: The `Lite` version and the `Pro` version share the same schematic diagram,
 | E-link Power Driver |                          TPS65185 (0x68)                          |
 |      IO Extend      |                         PCA9535PW (0x20)                          |
 
+Note: `GPS` is fitted as either the `MIA-M10Q` or the `L76K`. The two cannot be told apart by looking at the board, and their default baud rates differ (L76K 9600, MIA-M10Q 38400), so the module has to be probed in software. See [pinmap.md](./docs/pinmap.md) section 4.
+
 ➡ **T5_E_Paper_S3_Pro Related projects**:
 
 - [ [FastEPD](https://github.com/Xinyuan-LilyGO/FastEPD) ] : Optimized library for driving parallel eink displays with the ESP32
