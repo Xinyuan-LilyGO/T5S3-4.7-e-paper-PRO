@@ -10,6 +10,7 @@
 script/
 other/
 examples/FastEPD_factory/
+examples/riddle/main/RiddleSecrets.h
 examples/sx1262_recv_mic_fcc/
 examples/sx1262_send_mic_fcc/
 debug.md

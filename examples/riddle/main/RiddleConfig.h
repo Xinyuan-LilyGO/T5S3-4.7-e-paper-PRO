@@ -44,6 +44,12 @@
 #define RIDDLE_OPENAI_INSECURE_TLS 0
 #endif
 
+// Plain HTTP exposes the API key and page contents. Enable it only for a
+// trusted local endpoint that cannot offer TLS.
+#ifndef RIDDLE_ALLOW_PLAINTEXT_HTTP
+#define RIDDLE_ALLOW_PLAINTEXT_HTTP 0
+#endif
+
 #ifndef RIDDLE_WIFI_CONNECT_TIMEOUT_MS
 #define RIDDLE_WIFI_CONNECT_TIMEOUT_MS 20000UL
 #endif
@@ -65,7 +71,7 @@
 #endif
 
 #ifndef RIDDLE_ORACLE_REPLY_BYTES
-#define RIDDLE_ORACLE_REPLY_BYTES 768
+#define RIDDLE_ORACLE_REPLY_BYTES 1536
 #endif
 
 #ifndef RIDDLE_ORACLE_ERROR_BYTES

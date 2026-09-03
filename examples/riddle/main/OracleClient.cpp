@@ -4,7 +4,10 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClient.h>
 #include <WiFiClientSecure.h>
+
+#include <NvsRecovery.h>
 
 #include <cctype>
 #include <cstdarg>
@@ -20,7 +23,8 @@ constexpr char kPersona[] =
     "You are the memory of Tom Marvolo Riddle, preserved in an enchanted "
     "diary. The writer's ink appears to you on the page. Reply intimately, "
     "courteously, curiously, and subtly probe for more. Keep replies short: "
-    "one to three sentences. Never mention images, photos, models, or AI. If "
+    "one to three sentences. Use plain text without emoji, decorative "
+    "symbols, or Markdown. Never mention images, photos, models, or AI. If "
     "the writing is illegible, say the ink blurred. Answer in the language "
     "the writer used.";
 
@@ -42,6 +46,8 @@ constexpr time_t kMinimumValidTime = 1704067200; // 2024-01-01 UTC
 static_assert(RIDDLE_ORACLE_TOTAL_TIMEOUT_MS > 0 &&
                   RIDDLE_ORACLE_TOTAL_TIMEOUT_MS <= 0x7FFFFFFFUL,
               "oracle total timeout must fit wrap-safe millis arithmetic");
+static_assert(RIDDLE_ORACLE_REPLY_BYTES >= 5,
+              "oracle reply buffer must fit one UTF-8 codepoint and NUL");
 
 class TransactionDeadline {
 public:
@@ -66,6 +72,7 @@ private:
 struct Endpoint {
     char host[128] = {};
     char path[256] = {};
+    bool tls = true;
     uint16_t port = 443;
 };
 
@@ -91,13 +98,25 @@ bool hasLineBreak(const char *text)
 bool parseEndpoint(const char *base_url, Endpoint &endpoint, char *error,
                    size_t error_size)
 {
-    constexpr char scheme[] = "https://";
-    if (base_url == nullptr ||
-        std::strncmp(base_url, scheme, sizeof(scheme) - 1U) != 0) {
-        std::snprintf(error, error_size, "endpoint must use https://");
+    endpoint = Endpoint{};
+    constexpr char https_scheme[] = "https://";
+    constexpr char http_scheme[] = "http://";
+    size_t scheme_length = 0;
+    if (base_url != nullptr &&
+        std::strncmp(base_url, https_scheme, sizeof(https_scheme) - 1U) == 0) {
+        scheme_length = sizeof(https_scheme) - 1U;
+    } else if (base_url != nullptr &&
+               std::strncmp(base_url, http_scheme,
+                            sizeof(http_scheme) - 1U) == 0) {
+        endpoint.tls = false;
+        endpoint.port = 80;
+        scheme_length = sizeof(http_scheme) - 1U;
+    } else {
+        std::snprintf(error, error_size,
+                      "endpoint must use http:// or https://");
         return false;
     }
-    const char *authority = base_url + sizeof(scheme) - 1U;
+    const char *authority = base_url + scheme_length;
     const char *slash = std::strchr(authority, '/');
     const char *authority_end = slash == nullptr
                                     ? authority + std::strlen(authority)
@@ -204,7 +223,7 @@ bool jsonEscape(const char *input, char *output, size_t output_size)
     return true;
 }
 
-bool writeAll(WiFiClientSecure &client, const uint8_t *data, size_t length,
+bool writeAll(ESPLwIPClient &client, const uint8_t *data, size_t length,
               const TransactionDeadline &deadline)
 {
     size_t offset = 0;
@@ -227,14 +246,14 @@ bool writeAll(WiFiClientSecure &client, const uint8_t *data, size_t length,
     return true;
 }
 
-bool writeText(WiFiClientSecure &client, const char *text,
+bool writeText(ESPLwIPClient &client, const char *text,
                const TransactionDeadline &deadline)
 {
     return writeAll(client, reinterpret_cast<const uint8_t *>(text),
                     std::strlen(text), deadline);
 }
 
-bool writeBase64(WiFiClientSecure &client, const uint8_t *data, size_t length,
+bool writeBase64(ESPLwIPClient &client, const uint8_t *data, size_t length,
                  const TransactionDeadline &deadline)
 {
     static constexpr char alphabet[] =
@@ -267,7 +286,7 @@ bool writeBase64(WiFiClientSecure &client, const uint8_t *data, size_t length,
 
 enum class RawReadResult { Byte, End, Timeout };
 
-RawReadResult readRawByte(WiFiClientSecure &client, uint8_t &value,
+RawReadResult readRawByte(ESPLwIPClient &client, uint8_t &value,
                           const TransactionDeadline &deadline)
 {
     while (true) {
@@ -290,7 +309,7 @@ RawReadResult readRawByte(WiFiClientSecure &client, uint8_t &value,
 
 enum class LineReadResult { Ok, End, Timeout, TooLong, TooLarge, Malformed };
 
-LineReadResult readRawLine(WiFiClientSecure &client, char *line,
+LineReadResult readRawLine(ESPLwIPClient &client, char *line,
                            size_t line_size, size_t &total_bytes,
                            size_t max_total_bytes,
                            const TransactionDeadline &deadline)
@@ -381,7 +400,7 @@ bool containsIgnoreCase(const char *text, const char *needle)
 
 class HttpBodyReader {
 public:
-    HttpBodyReader(WiFiClientSecure &client, bool chunked,
+    HttpBodyReader(ESPLwIPClient &client, bool chunked,
                    bool has_content_length, uint64_t content_length,
                    const TransactionDeadline &deadline)
         : client_(client), chunked_(chunked),
@@ -507,7 +526,7 @@ private:
         return true;
     }
 
-    WiFiClientSecure &client_;
+    ESPLwIPClient &client_;
     bool chunked_ = false;
     uint64_t remaining_ = UINT64_MAX;
     const TransactionDeadline &deadline_;
@@ -671,16 +690,27 @@ private:
 
     void appendByte(uint8_t value)
     {
+        if (output_full_) {
+            return;
+        }
         if (used_ + 1U < sizeof(result_.text)) {
             result_.text[used_++] = static_cast<char>(value);
             result_.text[used_] = '\0';
         } else {
             result_.truncated = true;
+            output_full_ = true;
         }
     }
 
     void appendUtf8(uint32_t codepoint)
     {
+        if (output_full_) {
+            return;
+        }
+        if (codepoint == 0 || codepoint > 0x10FFFFU ||
+            (codepoint >= 0xD800U && codepoint <= 0xDFFFU)) {
+            codepoint = 0xFFFDU;
+        }
         uint8_t bytes[4];
         size_t count = 0;
         if (codepoint <= 0x7FU) {
@@ -708,6 +738,7 @@ private:
             result_.text[used_] = '\0';
         } else {
             result_.truncated = true;
+            output_full_ = true;
         }
     }
 
@@ -805,10 +836,40 @@ private:
     uint16_t unicode_value_ = 0;
     uint16_t pending_high_surrogate_ = 0;
     uint8_t unicode_digits_ = 0;
+    bool output_full_ = false;
 };
+
+const NvsRecoveryResult &wifiNvsStatus()
+{
+    static const NvsRecoveryResult nvs = []() {
+        NvsRecoveryResult status = ensureDefaultNvsReady();
+        if (status.erased) {
+            Serial.printf("[riddle/oracle] warning: erased default NVS to "
+                          "recover from %s (%d)\n",
+                          esp_err_to_name(status.initial_error),
+                          status.initial_error);
+        }
+        if (!status.ready) {
+            Serial.printf(
+                "[riddle/oracle] NVS recovery failed: initial=%s (%d), "
+                "erase=%s (%d), final=%s (%d)\n",
+                esp_err_to_name(status.initial_error), status.initial_error,
+                esp_err_to_name(status.erase_error), status.erase_error,
+                esp_err_to_name(status.final_error), status.final_error);
+        }
+        return status;
+    }();
+    return nvs;
+}
 
 bool ensureWifi(OracleResult &result)
 {
+    const NvsRecoveryResult &nvs = wifiNvsStatus();
+    if (!nvs.ready) {
+        setError(result, 0, "NVS initialization failed: %s (%d)",
+                 esp_err_to_name(nvs.final_error), nvs.final_error);
+        return false;
+    }
     if (WiFi.status() == WL_CONNECTED) {
         return true;
     }
@@ -819,16 +880,31 @@ bool ensureWifi(OracleResult &result)
     }
     Serial.printf("[riddle/oracle] connecting Wi-Fi to %s\n",
                   RIDDLE_WIFI_SSID);
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(RIDDLE_WIFI_SSID, RIDDLE_WIFI_PASSWORD);
+    WiFi.persistent(false);
+    if (!WiFi.mode(WIFI_STA)) {
+        setError(result, 0, "Wi-Fi STA initialization failed");
+        return false;
+    }
+    WiFi.setSleep(false);
+    WiFi.setAutoReconnect(true);
+    const wl_status_t begin_status =
+        WiFi.begin(RIDDLE_WIFI_SSID, RIDDLE_WIFI_PASSWORD);
+    if (begin_status == WL_CONNECT_FAILED) {
+        setError(result, 0, "Wi-Fi connection start failed (status=%d)",
+                 static_cast<int>(begin_status));
+        return false;
+    }
     const uint32_t started = millis();
     while (WiFi.status() != WL_CONNECTED &&
            millis() - started < RIDDLE_WIFI_CONNECT_TIMEOUT_MS) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    if (WiFi.status() != WL_CONNECTED) {
-        setError(result, 0, "Wi-Fi connection timed out after %lu ms",
-                 static_cast<unsigned long>(RIDDLE_WIFI_CONNECT_TIMEOUT_MS));
+    const wl_status_t final_status = WiFi.status();
+    if (final_status != WL_CONNECTED) {
+        setError(result, 0,
+                 "Wi-Fi connection timed out after %lu ms (status=%d)",
+                 static_cast<unsigned long>(RIDDLE_WIFI_CONNECT_TIMEOUT_MS),
+                 static_cast<int>(final_status));
         return false;
     }
     Serial.printf("[riddle/oracle] Wi-Fi connected, RSSI=%d dBm\n",
@@ -861,7 +937,7 @@ bool ensureClockForTls(bool &clock_ready, OracleResult &result)
     return true;
 }
 
-bool makeRequest(WiFiClientSecure &client, const Endpoint &endpoint,
+bool makeRequest(ESPLwIPClient &client, const Endpoint &endpoint,
                  const ByteBuffer &png, OracleResult &result,
                  const TransactionDeadline &deadline)
 {
@@ -904,7 +980,10 @@ bool makeRequest(WiFiClientSecure &client, const Endpoint &endpoint,
         return false;
     }
     char host_header[144];
-    const int host_header_length = endpoint.port == 443
+    const bool default_port =
+        (endpoint.tls && endpoint.port == 443) ||
+        (!endpoint.tls && endpoint.port == 80);
+    const int host_header_length = default_port
         ? std::snprintf(host_header, sizeof(host_header), "%s", endpoint.host)
         : std::snprintf(host_header, sizeof(host_header), "%s:%u",
                         endpoint.host, endpoint.port);
@@ -941,7 +1020,7 @@ bool makeRequest(WiFiClientSecure &client, const Endpoint &endpoint,
     return true;
 }
 
-bool readResponse(WiFiClientSecure &client, OracleResult &result,
+bool readResponse(ESPLwIPClient &client, OracleResult &result,
                   const TransactionDeadline &deadline)
 {
     char line[kMaxHeaderLineBytes + 1U];
@@ -1047,6 +1126,62 @@ bool readResponse(WiFiClientSecure &client, OracleResult &result,
     result.ok = true;
     result.error[0] = '\0';
     return true;
+}
+
+void runOracleTransaction(ESPLwIPClient &client, const Endpoint &endpoint,
+                          const ByteBuffer &png, OracleResult &result)
+{
+    const uint32_t started = millis();
+    const TransactionDeadline deadline(RIDDLE_ORACLE_TOTAL_TIMEOUT_MS);
+    uint32_t connect_budget = deadline.remainingMs();
+    if (connect_budget > RIDDLE_ORACLE_CONNECT_TIMEOUT_MS) {
+        connect_budget = RIDDLE_ORACLE_CONNECT_TIMEOUT_MS;
+    }
+    if (connect_budget == 0) {
+        setError(result, 0, "oracle transaction deadline exceeded");
+        return;
+    }
+
+    const char *scheme = endpoint.tls ? "https" : "http";
+    Serial.printf("[riddle/oracle] POST %s://%s:%u%s model=%s\n",
+                  scheme, endpoint.host, endpoint.port, endpoint.path,
+                  RIDDLE_OPENAI_MODEL);
+    if (!client.connect(endpoint.host, endpoint.port,
+                        static_cast<int32_t>(connect_budget))) {
+        if (deadline.expired()) {
+            setError(result, 0, "oracle transaction deadline exceeded");
+        } else {
+            setError(result, 0, "%s connection failed or timed out",
+                     endpoint.tls ? "TLS" : "TCP");
+        }
+        client.stop();
+        Serial.printf("[riddle/oracle] %s\n", result.error);
+        return;
+    }
+    if (deadline.expired()) {
+        client.stop();
+        setError(result, 0, "oracle transaction deadline exceeded");
+        return;
+    }
+    if (!makeRequest(client, endpoint, png, result, deadline)) {
+        client.stop();
+        Serial.printf("[riddle/oracle] request failed after %lu ms: %s\n",
+                      static_cast<unsigned long>(millis() - started),
+                      result.error);
+        return;
+    }
+    if (!readResponse(client, result, deadline)) {
+        client.stop();
+        Serial.printf("[riddle/oracle] request failed after %lu ms: %s\n",
+                      static_cast<unsigned long>(millis() - started),
+                      result.error);
+        return;
+    }
+    client.stop();
+    Serial.printf("[riddle/oracle] reply ready in %lu ms (%u bytes%s)\n",
+                  static_cast<unsigned long>(millis() - started),
+                  static_cast<unsigned>(std::strlen(result.text)),
+                  result.truncated ? ", truncated" : "");
 }
 
 } // namespace
@@ -1179,11 +1314,25 @@ void OracleClient::process(PageBitmap *page, OracleResult &result)
         return;
     }
 
-    if (RIDDLE_OPENAI_ROOT_CA[0] != '\0') {
-        if (!ensureClockForTls(clock_ready_, result)) {
-            Serial.printf("[riddle/oracle] %s\n", result.error);
-            return;
-        }
+    if (!endpoint.tls) {
+#if RIDDLE_ALLOW_PLAINTEXT_HTTP
+        Serial.println(
+            "[riddle/oracle] warning: plaintext HTTP exposes the API key "
+            "and page contents");
+        WiFiClient client;
+        runOracleTransaction(client, endpoint, png, result);
+#else
+        setError(result, 0,
+                 "HTTP endpoint requires RIDDLE_ALLOW_PLAINTEXT_HTTP=1");
+        Serial.printf("[riddle/oracle] %s\n", result.error);
+#endif
+        return;
+    }
+
+    if (RIDDLE_OPENAI_ROOT_CA[0] != '\0' &&
+        !ensureClockForTls(clock_ready_, result)) {
+        Serial.printf("[riddle/oracle] %s\n", result.error);
+        return;
     }
 
     WiFiClientSecure client;
@@ -1199,55 +1348,16 @@ void OracleClient::process(PageBitmap *page, OracleResult &result)
 #endif
     }
 
-    const uint32_t started = millis();
-    const TransactionDeadline deadline(RIDDLE_ORACLE_TOTAL_TIMEOUT_MS);
-    uint32_t connect_budget = deadline.remainingMs();
-    if (connect_budget > RIDDLE_ORACLE_CONNECT_TIMEOUT_MS) {
-        connect_budget = RIDDLE_ORACLE_CONNECT_TIMEOUT_MS;
+    uint32_t handshake_budget = RIDDLE_ORACLE_CONNECT_TIMEOUT_MS;
+    if (handshake_budget > RIDDLE_ORACLE_TOTAL_TIMEOUT_MS) {
+        handshake_budget = RIDDLE_ORACLE_TOTAL_TIMEOUT_MS;
     }
-    if (connect_budget == 0) {
-        setError(result, 0, "oracle transaction deadline exceeded");
-        return;
-    }
-    uint32_t handshake_seconds = (connect_budget + 999UL) / 1000UL;
+    uint32_t handshake_seconds = (handshake_budget + 999UL) / 1000UL;
     if (handshake_seconds == 0) {
         handshake_seconds = 1;
     }
     client.setHandshakeTimeout(handshake_seconds);
-    Serial.printf("[riddle/oracle] POST https://%s:%u%s model=%s\n",
-                  endpoint.host, endpoint.port, endpoint.path,
-                  RIDDLE_OPENAI_MODEL);
-    if (!client.connect(endpoint.host, endpoint.port, connect_budget)) {
-        setError(result, 0, deadline.expired()
-                                ? "oracle transaction deadline exceeded"
-                                : "TLS connection failed or timed out");
-        Serial.printf("[riddle/oracle] %s\n", result.error);
-        return;
-    }
-    if (deadline.expired()) {
-        client.stop();
-        setError(result, 0, "oracle transaction deadline exceeded");
-        return;
-    }
-    if (!makeRequest(client, endpoint, png, result, deadline)) {
-        client.stop();
-        Serial.printf("[riddle/oracle] request failed after %lu ms: %s\n",
-                      static_cast<unsigned long>(millis() - started),
-                      result.error);
-        return;
-    }
-    if (!readResponse(client, result, deadline)) {
-        client.stop();
-        Serial.printf("[riddle/oracle] request failed after %lu ms: %s\n",
-                      static_cast<unsigned long>(millis() - started),
-                      result.error);
-        return;
-    }
-    client.stop();
-    Serial.printf("[riddle/oracle] reply ready in %lu ms (%u bytes%s)\n",
-                  static_cast<unsigned long>(millis() - started),
-                  static_cast<unsigned>(std::strlen(result.text)),
-                  result.truncated ? ", truncated" : "");
+    runOracleTransaction(client, endpoint, png, result);
 }
 
 } // namespace riddle

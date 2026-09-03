@@ -10,7 +10,8 @@ namespace riddle {
 
 class ReplyRenderer {
 public:
-    bool begin(lgfx::LovyanGFX &surface, const char *text);
+    bool begin(lgfx::LovyanGFX &surface, const char *text,
+               bool input_truncated = false);
     Rect drawNext(lgfx::LovyanGFX &surface, uint8_t glyph_budget = 2);
     bool done() const;
     Rect region() const;
@@ -25,13 +26,15 @@ private:
     String lines_[kMaxLines];
     int16_t line_x_[kMaxLines] = {};
     int16_t line_y_[kMaxLines] = {};
+    int16_t line_width_[kMaxLines] = {};
     size_t line_count_ = 0;
     size_t line_index_ = 0;
     size_t byte_index_ = 0;
     size_t text_bytes_ = 0;
+    int16_t drawn_width_ = 0;
+    int16_t font_height_ = 0;
     int16_t line_height_ = 0;
     Rect region_ = {};
 };
 
 } // namespace riddle
-

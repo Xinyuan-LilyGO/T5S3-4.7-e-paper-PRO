@@ -3,6 +3,8 @@
 #include <WiFi.h>
 #include <Wire.h>
 
+#include <NvsRecovery.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -17,6 +19,11 @@ using lgfx::epd_mode_t;
 namespace {
 
 constexpr char kTag[] = "m5gfx_wifi_scan";
+
+struct TargetCredential {
+    const char *ssid;
+    const char *password;
+};
 
 constexpr TargetCredential kTargets[] = {
     {"xinyuandianzi", "AA15994823428"},
@@ -85,11 +92,6 @@ constexpr int kTargetsHeight = 110;
 constexpr int kCardRadius = 16;
 constexpr size_t kMaxVisibleNetworks = 14;
 
-struct TargetCredential {
-    const char *ssid;
-    const char *password;
-};
-
 struct Rect {
     int x;
     int y;
@@ -125,6 +127,7 @@ uint32_t g_next_scan_ms = 0;
 uint8_t g_text_refresh_count = 0;
 bool g_has_scanned_once = false;
 bool g_last_scan_failed = false;
+bool g_wifi_ready = false;
 
 bool i2cWriteBytes(uint8_t address, const uint8_t *data, size_t length)
 {
@@ -763,6 +766,7 @@ void runScanCycle()
     delay(80);
 
     const int16_t count = WiFi.scanNetworks(false, true);
+    Serial.printf("[%s] scan result=%d\n", kTag, count);
     collectScanResults(count);
 
     int32_t best_rssi = INT32_MIN;
@@ -827,6 +831,20 @@ void setup()
     Serial.println("[M5GFX_WIFI] start");
     Serial.println("[M5GFX_WIFI] scan and auto-connect example");
 
+    const NvsRecoveryResult nvs = ensureDefaultNvsReady();
+    if (nvs.erased) {
+        Serial.printf("[M5GFX_WIFI] WARNING: erased default NVS to recover "
+                      "from %s (%d)\n",
+                      esp_err_to_name(nvs.initial_error), nvs.initial_error);
+    }
+    if (!nvs.ready) {
+        Serial.printf("[M5GFX_WIFI] NVS recovery failed: initial=%s (%d), "
+                      "erase=%s (%d), final=%s (%d)\n",
+                      esp_err_to_name(nvs.initial_error), nvs.initial_error,
+                      esp_err_to_name(nvs.erase_error), nvs.erase_error,
+                      esp_err_to_name(nvs.final_error), nvs.final_error);
+    }
+
     if (!display.init_without_reset(false)) {
         Serial.println("[M5GFX_WIFI] display init failed");
         while (true) {
@@ -834,8 +852,28 @@ void setup()
         }
     }
 
+    if (!nvs.ready) {
+        setStatus(
+            AppState::kConnectFailed,
+            "NVS initialization failed",
+            String("Error: ") + esp_err_to_name(nvs.final_error),
+            "WiFi disabled; check Serial log");
+        refreshScreen(epd_mode_t::epd_quality);
+        return;
+    }
+
     WiFi.persistent(false);
-    WiFi.mode(WIFI_STA);
+    if (!WiFi.mode(WIFI_STA)) {
+        Serial.println("[M5GFX_WIFI] failed to start WiFi STA mode");
+        setStatus(
+            AppState::kConnectFailed,
+            "WiFi STA initialization failed",
+            "NVS is ready",
+            "Restart device; check Serial log");
+        refreshScreen(epd_mode_t::epd_quality);
+        return;
+    }
+    g_wifi_ready = true;
     WiFi.setSleep(false);
     WiFi.setAutoReconnect(true);
     WiFi.disconnect();
@@ -852,6 +890,10 @@ void setup()
 
 void loop()
 {
+    if (!g_wifi_ready) {
+        delay(1000);
+        return;
+    }
     if (WiFi.status() == WL_CONNECTED) {
         delay(250);
         return;

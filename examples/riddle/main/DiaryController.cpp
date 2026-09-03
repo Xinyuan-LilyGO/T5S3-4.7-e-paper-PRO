@@ -268,7 +268,7 @@ void DiaryController::startReply(const OracleResult &result, uint32_t now)
 
     surface_->fillScreen(TFT_WHITE);
     markDirty({0, 0, surface_->width(), surface_->height()});
-    reply_.begin(*surface_, text.c_str());
+    reply_.begin(*surface_, text.c_str(), result.ok && result.truncated);
     state_ = State::Replying;
     next_action_ms_ = now;
     Serial.printf("[RIDDLE] reply ready (%u bytes, HTTP %u)\n",

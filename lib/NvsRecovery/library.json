@@ -1,0 +1,8 @@
+{
+    "name": "NvsRecovery",
+    "version": "0.1.0",
+    "description": "Bounded recovery for an unusable ESP32 default NVS partition",
+    "license": "GPL-2.0-only",
+    "frameworks": "arduino",
+    "platforms": "espressif32"
+}

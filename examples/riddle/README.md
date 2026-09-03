@@ -32,9 +32,15 @@
 
 // 仅限隔离的台架快速验证；这会关闭服务端身份校验。
 // #define RIDDLE_OPENAI_INSECURE_TLS 1
+
+// 仅限可信局域网中的明文 HTTP 服务；API key 和页面内容不会被加密。
+// #define RIDDLE_OPENAI_BASE_URL "http://192.168.1.10:8080/v1"
+// #define RIDDLE_ALLOW_PLAINTEXT_HTTP 1
 ```
 
-默认会安全失败，只有提供 `RIDDLE_OPENAI_ROOT_CA` 或显式设置 `RIDDLE_OPENAI_INSECURE_TLS=1` 才会联网请求。使用 CA 时固件会在首次请求前通过 NTP 同步证书校验所需的系统时间。每次 HTTP 事务有统一的 120 秒截止时间，响应头与正文扫描长度也有上限。API key 不应写入公开固件；量产版本应改为受控配网和安全存储。
+HTTPS 默认会安全失败，只有提供 `RIDDLE_OPENAI_ROOT_CA` 或显式设置 `RIDDLE_OPENAI_INSECURE_TLS=1` 才会发起请求。使用 CA 时固件会在首次请求前通过 NTP 同步证书校验所需的系统时间。明文 HTTP 必须显式设置 `RIDDLE_ALLOW_PLAINTEXT_HTTP=1`，且只适合受信任的隔离局域网。每次 HTTP 事务有统一的 120 秒截止时间，响应头与正文扫描长度也有上限。API key 不应写入公开固件；量产版本应改为受控配网和安全存储。
+
+首次联网前会检查默认 NVS。若遇到 `ESP_ERR_NVS_NOT_ENOUGH_SPACE`、`ESP_ERR_NVS_NO_FREE_PAGES` 或 `ESP_ERR_NVS_NEW_VERSION_FOUND`，示例会擦除默认 NVS 并重新初始化，然后再启动 Wi-Fi。该恢复会清除 Preferences、SDK 保存的 Wi-Fi 状态和 BLE 配对信息，但不会影响固件或 SPIFFS；其他 NVS/Flash 错误不会触发自动擦除。
 
 ## 构建
 
